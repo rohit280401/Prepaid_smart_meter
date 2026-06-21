@@ -1,155 +1,43 @@
-# 🔌 Sensor & Module Connections (Arduino + LoRa Shield System)
+# IoT-Enabled Smart Prepaid Energy Meter
 
-## 🧰 Hardware Used
-
-* Arduino (UNO/Nano with ETS LoRa Shield)
-* Relay Module (5V)
-* ACS712 Current Sensor 
-* ZMPT101B Voltage Sensor
-* 16x2 LCD
-* MFRC522 RFID Module
+An advanced, ATmega328P-based prepaid electricity metering system featuring real-time AC power monitoring, secure RFID-based token recharges, non-blocking cooperative multitasking, a "Dying Gasp" power-failure protection mechanism, and long-range wireless telemetry via LoRa.
 
 ---
 
-# ⚠️ IMPORTANT (READ FIRST)
+## 📋 System Overview & Features
 
-* LoRa shield already uses **SPI (D10–D13)**
-* RFID also uses SPI → **pin conflict possible**
-* You must use **separate SS pins** carefully
+This system functions as a digital Pay-As-You-Go (PAYG) electricity meter designed to monitor utility power lines dynamically and enforce credit limits via a physical relay switch.
 
----
-
-# 📡 1. ACS712 Current Sensor
-
-| ACS712 | Arduino |
-| ------ | ------- |
-| VCC    | 5V      |
-| GND    | GND     |
-| OUT    | A1      |
-
-👉 Measures current
+* **Prepaid Balance Enforcement:** Power is delivered to the consumer load only if the meter maintains a positive balance. Credit is consumed dynamically based on computed watt-hours.
+* **Real-Time AC Metrology:** Accurately samples voltage and current waves to calculate True RMS Voltage, RMS Current, Real Power (Watts), and Power Factor (PF) utilizing the `EmonLib` framework.
+* **Wireless Telemetry:** Dispatches periodic status packets over LoRa (configured for the 865 MHz ISM band in India) containing current system health metrics and a unified timestamp.
+* **Hardware-Level Data Preservation ("Dying Gasp"):** Monitors raw input rails via a hardware interrupt. If a primary power drop is caught, it sheds all peripheral loads instantly, runs a critical EEPROM dump to save user balance, and broadcasts an emergency LoRa alert before the system completely powers down.
+* **Cooperative Scheduler:** Avoids CPU-blocking `delay()` instructions entirely, keeping RFID scanning, telemetry, power calculations, and the I2C LCD screen cycling at precise, independent intervals.
 
 ---
 
-# ⚡ 2. ZMPT101B Voltage Sensor
+## 🔌 Hardware Connection Table
 
-| ZMPT | Arduino |
-| ---- | ------- |
-| VCC  | 5V      |
-| GND  | GND     |
-| OUT  | A0      |
+The following table outlines the complete wiring mapping for the microcontroller, sensing components, communications modules, and local user interfaces:
 
-👉 Measures AC voltage
-
----
-
-# 🔌 3. Relay Module (Active LOW assumed)
-
-| Relay | Arduino |
-| ----- | ------- |
-| VCC   | 5V      |
-| GND   | GND     |
-| IN    | D3      |
-
-### AC Side:
-
-| Wire    | Connection     |
-| ------- | -------------- |
-| Live    | COM            |
-| NO      | Load           |
-| Neutral | Direct to load |
-
+| Peripheral Module | Pin Name | Arduino Uno/Nano Pin | Signal Type / Notes |
+| :--- | :--- | :--- | :--- |
+| **Consumer Relay** | IN | `D4` | Digital Output (LOW = Load Connected, HIGH = Isolated) |
+| **AC Voltage Sensor** | Analog Out | `A0` | Analog Input (Sensed via Step-down AC Transformer) |
+| **AC Current Sensor** | Analog Out | `A1` | Analog Input (Sensed via Current Transformer - CT) |
+| **Dying Gasp Monitor**| V_Sense | `D3` | Digital Input (Hardware Interrupt 1 / Connected to 45K/45K Divider) |
+| **MFRC522 RFID** | SDA (SS) | `D8` | SPI Chip Select (Isolated on hardware sleep) |
+| **MFRC522 RFID** | SCK | `D13` | SPI Clock |
+| **MFRC522 RFID** | MOSI | `D11` | SPI Master Output, Slave Input |
+| **MFRC522 RFID** | MISO | `D12` | SPI Master Input, Slave Output |
+| **MFRC522 RFID** | RST | `D9` | Digital Output / Hard Reset line for power management |
+| **SX1278 LoRa** | NSS (SS) | `D10` | SPI Chip Select |
+| **SX1278 LoRa** | RST | `D7` | Digital Output / Module Reset |
+| **SX1278 LoRa** | DIO0 | `D2` | Digital Input (Hardware Interrupt 0 / Packet TX/RX completion) |
+| **DS3231 RTC** | SDA | `A4` (SDA) | I2C Data Line |
+| **DS3231 RTC** | SCL | `A5` (SCL) | I2C Clock Line |
+| **I2C 16x2 LCD** | SDA / SCL | Shared I2C | Addresses on `0x27` for secondary display loop |
 
 ---
 
-# 📟 4. 16x2 LCD (I2C)
-
-| LCD | Arduino |
-| --- | ------- |
-| VCC | 5V      |
-| GND | GND     |
-| SDA | A4      |
-| SCL | A5      |
-
-👉 Default I2C address: `0x27` (may vary)
-
----
-
-# 🪪 5. MFRC522 RFID (SPI)
-
-| RFID     | Arduino         |
-| -------- | --------------- |
-| SDA (SS) | D8  |
-| SCK      | D13             |
-| MOSI     | D11             |
-| MISO     | D12             |
-| RST      | D9              |
-| GND      | GND             |
-| 3.3V     | 3.3V ⚠️         |
-
----
-
-## ⚠️ VERY IMPORTANT (SPI Sharing)
-
-| Device | SS Pin |
-| ------ | ------ |
-| LoRa   | D10    |
-| RFID   | D8     |
-
-👉 Only one SPI device active at a time
-
----
-
-# 🔋 Power Summary
-
-| Component | Voltage      |
-| --------- | ------------ |
-| Arduino   | USB / 5V     |
-| Relay     | 5V           |
-| LCD       | 5V           |
-| ACS712    | 5V           |
-| ZMPT      | 5V           |
-| RFID      | ⚠️ 3.3V ONLY |
-
----
-
-# 🚨 Common Mistakes
-
-## ❌ RFID on 5V
-
-→ will damage module
-
-## ❌ Same SS pin for LoRa & RFID
-
-→ SPI conflict → nothing works
-
-## ❌ Relay powering Arduino line
-
-→ system shuts down when load OFF
-
-## ❌ No common ground
-
-→ unstable readings
-
----
-
-# 🧠 System Overview
-
-```text
-Voltage → ZMPT → A0
-Current → ACS712 → A1
-RFID → SPI (D8)
-LoRa → SPI (D10)
-Relay → D3
-LCD → I2C (A4, A5)
-```
-
----
-
-# 🎯 Final Notes
-
-* Keep wiring short and clean
-* Use common GND everywhere
-* Test modules individually before integration
-
----
+## 🛠 Circuit Diagram Description
