@@ -1,119 +1,181 @@
+# Smart Prepaid Energy Meter (Arduino + RFID + LoRa)
 
-# IoT-Enabled Smart Prepaid Energy Meter
-
-An advanced, ATmega328P-based prepaid electricity metering system featuring real-time AC power monitoring, secure RFID-based token recharges, non-blocking cooperative multitasking, a "Dying Gasp" power-failure protection mechanism, and long-range wireless telemetry via LoRa.
-
----
-
-## 📋 System Overview & Features
-
-This system functions as a digital Pay-As-You-Go (PAYG) electricity meter designed to monitor utility power lines dynamically and enforce credit limits via a physical relay switch.
-
-* **Prepaid Balance Enforcement:** Power is delivered to the consumer load only if the meter maintains a positive balance. Credit is consumed dynamically based on computed watt-hours.
-* **Real-Time AC Metrology:** Accurately samples voltage and current waves to calculate True RMS Voltage, RMS Current, Real Power (Watts), and Power Factor (PF) utilizing the `EmonLib` framework.
-* **Wireless Telemetry:** Dispatches periodic status packets over LoRa (configured for the 865 MHz ISM band in India) containing current system health metrics and a unified timestamp.
-* **Hardware-Level Data Preservation ("Dying Gasp"):** Monitors raw input rails via a hardware interrupt. If a primary power drop is caught, it sheds all peripheral loads instantly, runs a critical EEPROM dump to save user balance, and broadcasts an emergency LoRa alert before the system completely powers down.
-* **Cooperative Scheduler:** Avoids CPU-blocking `delay()` instructions entirely, keeping RFID scanning, telemetry, power calculations, and the I2C LCD screen cycling at precise, independent intervals.
+A standalone, **prepaid electricity meter** built on an Arduino-class MCU. The meter measures real‑time voltage, current, power and power factor, deducts energy units as they are consumed, lets a user recharge their balance by tapping an RFID card, displays everything on a 16x2 I2C LCD, transmits telemetry over LoRa, and survives a sudden power loss without losing the user's balance ("dying gasp" save).
 
 ---
 
-## 🔌 Hardware Connection Table
+## ✨ Features
 
-The following table outlines the complete wiring mapping for the microcontroller, sensing components, communications modules, and local user interfaces:
-
-| Peripheral Module | Pin Name | Arduino Uno/Nano Pin | Signal Type / Notes |
-| :--- | :--- | :--- | :--- |
-| **Consumer Relay** | IN | `D4` | Digital Output (LOW = Load Connected, HIGH = Isolated) |
-| **AC Voltage Sensor** | Analog Out | `A0` | Analog Input (Sensed via Step-down AC Transformer) |
-| **AC Current Sensor** | Analog Out | `A1` | Analog Input (Sensed via Current Transformer - CT) |
-| **Dying Gasp Monitor**| V_Sense | `D3` | Digital Input (Hardware Interrupt 1 / Connected to 45K/45K Divider) |
-| **MFRC522 RFID** | SDA (SS) | `D8` | SPI Chip Select (Isolated on hardware sleep) |
-| **MFRC522 RFID** | SCK | `D13` | SPI Clock |
-| **MFRC522 RFID** | MOSI | `D11` | SPI Master Output, Slave Input |
-| **MFRC522 RFID** | MISO | `D12` | SPI Master Input, Slave Output |
-| **MFRC522 RFID** | RST | `D9` | Digital Output / Hard Reset line for power management |
-| **SX1278 LoRa** | NSS (SS) | `D10` | SPI Chip Select |
-| **SX1278 LoRa** | RST | `D7` | Digital Output / Module Reset |
-| **SX1278 LoRa** | DIO0 | `D2` | Digital Input (Hardware Interrupt 0 / Packet TX/RX completion) |
-| **DS3231 RTC** | SDA | `A4` (SDA) | I2C Data Line |
-| **DS3231 RTC** | SCL | `A5` (SCL) | I2C Clock Line |
-| **I2C 16x2 LCD** | SDA / SCL | Shared I2C | Addresses on `0x27` for secondary display loop |
+- ⚡ Real-time **voltage / current / power / power factor** measurement using EmonLib
+- 💳 **RFID-based prepaid recharge** (MIFARE card, single data block used as a token)
+- 🔌 **Automatic relay cutoff** when balance reaches zero, automatic reconnect on recharge
+- 📟 **16x2 I2C LCD** that cycles between balance, electrical readings, and date/time
+- 📡 **LoRa telemetry** (865 MHz, India ISM band) sent every few seconds to a base station/gateway
+- 🛡️ **Dying-gasp protection** — a hardware interrupt detects mains loss and saves the live balance to EEPROM before the supply capacitor drains
+- 🔋 **Adaptive RFID power-down** — the RFID reader's antenna/RST line is only powered when needed, to save energy
+- 🕒 **RTC (DS3231)** for accurate timestamps on the LCD and in LoRa payloads
+- 🧵 **Cooperative (non-blocking) task scheduler** — no RTOS, no `delay()` blocking, runs comfortably on a single core with very little RAM
 
 ---
 
-## 🛠 Circuit Diagram Description
+## 🧰 Hardware / Bill of Materials
 
+| Component | Purpose |
+|---|---|
+| Arduino Uno / Nano (ATmega328P) | Main controller |
+| ZMPT101B (or similar) voltage sensor | AC voltage sensing |
+| SCT-013 / ACS712-style current sensor | AC current sensing |
+| 5V Relay module | Load connect/disconnect |
+| MFRC522 RFID reader + MIFARE Classic card | Recharge token |
+| LiquidCrystal_I2C 16x2 LCD | Local display |
+| LoRa module (SX1278, 865 MHz) | Wireless telemetry |
+| DS3231 RTC module | Real-time clock |
+| 45KΩ / 45KΩ voltage divider | Mains-loss ("dying gasp") detection |
+| External AC–DC step-down / DC-DC buck converter (5V) | Powers the whole board from mains (see [Power Supply Design](#-power-supply-design-journey)) |
+| Small holdup capacitor | Keeps the 5V rail alive just long enough to finish the EEPROM write after mains loss |
+
+---
+
+## 🔌 Circuit / Pin Connections
+
+| Signal | Arduino Pin | Notes |
+|---|---|---|
+| Relay control | D4 | `LOW` = load ON, `HIGH` = load OFF |
+| Voltage sensor (ZMPT) | A0 | Calibrated via `VOLTAGE_CAL = 417.0` |
+| Current sensor (SCT) | A1 | Calibrated via `CURRENT_CAL = 14.0` |
+| RFID SDA/SS | D8 | MFRC522 chip select |
+| RFID RST | D9 | Also used to hard-sleep the reader |
+| RFID MOSI | D11 | Standard Uno SPI |
+| RFID SCK | D13 | Standard Uno SPI |
+| LoRa NSS | D10 | LoRa chip select |
+| LoRa RST | D7 | |
+| LoRa DIO0 | D2 | |
+| Mains-loss sense | D3 (`POWER_SENSE_PIN`) | Fed from a 45K/45K divider off the 5V rail; triggers `runDyingGaspISR()` on `FALLING` edge |
+| LCD SDA/SCL | A4/A5 (I2C) | Address `0x27` |
+| RTC SDA/SCL | A4/A5 (shared I2C bus) | DS3231 |
 
 ```
+                +-------------------+
+   MAINS  ----> | AC-DC / DC-DC     | --5V--+--> Arduino 5V/VIN
+   (220V) |     | Buck Converter    |       |
+          |     +-------------------+       +--> Holdup Capacitor
+          |                                       (for dying-gasp only)
+          |
+          +--> Voltage Sensor (ZMPT) --> A0
+          +--> Current Sensor (SCT) ----> A1
+          +--> Relay (NO contact) ------> Load
+                     ^
+                     |
+                  D4 (Arduino)
 
-```
-              +-----------------------------------------+
-              |            ATmega328P Master            |
-              +-----------------------------------------+
-                |       |       |       |       |     |
-     +----------+       |       |       |       |     +----------+
-     | (SPI)            | (I2C) | (Int) | (Int) | (GPIO)         | (Analog)
-     v                  v       v       v       v                v
+   45K/45K Divider off 5V rail --> D3 (interrupt, mains-loss detect)
 
-```
-
-+--------------+    +--------+ +-----+ +-----+ +-------+    +--------------+
-|  LoRa SX1278 |    | DS3231 | | RFID| |Power| | Relay |    | Emon AC Pins |
-|  Transceiver |    |   RTC  | |RC522| |Sense| |Control|    | (Volt / Curr)|
-+--------------+    +--------+ +-----+ +-----+ +-------+    +--------------+
-|                  |        |                |
-v                  v        v                v
-+--------+          [45K/45K] [AC Line]     [Transformers/
-|I2C LCD |          Divider]    Switch       Sensing Nets]
-+--------+
-
+   MFRC522 (SPI) <--> Arduino (D8,D9,D11,D13 + SCK/MISO)
+   LoRa SX1278 (SPI) <--> Arduino (D10,D7,D2 + SCK/MISO/MOSI)
+   LCD 16x2 (I2C) <--> Arduino (A4/A5)
+   DS3231 RTC (I2C) <--> Arduino (A4/A5, shared bus)
 ```
 
-The system topology is split into three layers:
-1. **Sensing Layer:** The mains power grid passes through current and voltage sensing nets. These break down high voltages into low-voltage analog signals readable at `A0` and `A1`. Concurrently, a $45\,\text{k}\Omega / 45\,\text{k}\Omega$ voltage divider reduces the $5\text{V}$ rail input down into an early-warning signal mapped straight into external interrupt pin `D3`.
-2. **Control & Storage Layer:** The microcontroller processes incoming computations in RAM. Storage tasks are offloaded to an internal EEPROM for tracking balance metadata, while real-time timestamps are pulled sequentially from the I2C DS3231 module. 
-3. **Execution & Telemetry Layer:** Physical current isolation is triggered through a transistor driving a 5V relay line (`D4`). Continuous system updates are pushed over an SPI bus shared between the MFRC522 and SX1278 LoRa modules using individual chip-select controls (`D8` and `D10`).
+> Replace the ASCII block above with your actual schematic/fritzing image (`docs/circuit_diagram.png`) for the GitHub page — the table covers every connection used in the firmware.
 
 ---
 
-## 📈 System Pros (Advantages)
-
-* **Robust Power Failure Safeguards:** The combination of a hardware-driven interrupt paired with an external decoupling capacitor network ensures data corruption is impossible during sudden grid dropouts.
-* **Low Idle Current Leakage:** Implements dynamic hardware power isolation. When the balance is completely safe, the system safely triggers a deep shutdown of the high-draw RFID antenna circuit, reducing overall standby consumption.
-* **True Non-Blocking Traversal:** By utilizing structural microsecond scheduling, the system can compute highly demanding root-mean-square current calculations without freezing UI updates or missing short RFID tap windows.
-* **Localized Temporal Validity:** Relying on a dedicated hardware DS3231 real-time clock ensures that timestamping remains completely accurate, even if wireless gateway connectivity is broken for extended durations.
-
----
-
-## ⚠️ Challenges Faced & Engineering Solutions
-
-### 1. The Broken Early-Warning Noise Gate
-* **The Problem:** Early iterations utilized a crash threshold value of `630` for the voltage-divider crash sensing loop. Because a standard operational $5\text{V}$ line across a $45\,\text{k}\Omega / 45\,\text{k}\Omega$ divider only produces an ADC value of `512`, the early warning system was stuck in a permanent false-alarm loop, crashing the meter instantly during boot.
-* **The Solution:** Adjusted the software crash threshold down to `500` (representing roughly $4.5\text{V}$). This establishes a reliable noise gate that ignores nominal grid ripples but acts quickly enough during real power drops to let the decoupling capacitors complete an EEPROM save.
-
-### 2. Parasitic SPI Cross-Backpowering
-* **The Problem:** To save power, the system pulled the RFID `RST_PIN` low when credit was available. However, because the system loop continued to call `mfrc522.PCD_AntennaOff()` over the SPI bus while the RFID chip was unpowered, current leaked into the dead peripheral via the shared MOSI/SCK lines. This caused systematic hardware freezes.
-* **The Solution:** Centralized the power control routines into dedicated `shutdownRFIDReader()` and `wakeupRFIDReader()` blocks. When shutting down the module, the shared data lines are temporarily converted into high-impedance inputs (`INPUT`), decoupling parasitic current loops completely.
-
-### 3. I2C Bus Deadlocks Inside the ISR
-* **The Problem:** The initial "Dying Gasp" routine executed `rtc.now()` inside an Interrupt Service Routine (ISR) to timestamp the error log. Because the `Wire` (I2C) library relies on active system interrupts to clear hardware flags, running it inside an ISR (where nested interrupts are disabled) caused permanent CPU lockups before the EEPROM write could even begin.
-* **The Solution:** Removed all I2C calls from the ISR. The Dying Gasp routine now only interacts with the raw hardware state, cuts the consumer load, writes the raw balance bytes directly to EEPROM (which does not depend on nested interrupts), and utilizes a swift `volatile` flag to let the main loop safely process the remaining telemetry commands.
-
-### 4. The Token Duplicate Extraction Exploit
-* **The Problem:** The RFID transaction routine added credit to the internal meter variable *before* verifying that the balance on the physical RFID card token block was wiped. If a user quickly removed their card mid-read, they could get credited on the meter without clearing the card, leading to an exploit for free, infinite energy recharges.
-* **The Solution:** Structured the transaction logic so that it is strictly transaction-safe. The system now authenticates the card, reads the value, clears the card token memory block to zero, verifies that the block write was completely successful, and only *then* credits `availableUnits` in the meter's volatile RAM.
-
----
-
-## 🚀 Deployment Instructions
-
-1. **Library Dependencies:** Install the following libraries within your Arduino IDE environment:
-   * `EmonLib`
-   * `MFRC522`
-   * `LiquidCrystal_I2C`
-   * `LoRa` (by Sandeep Mistry)
-   * `RTClib` (by Adafruit)
-2. **Hardware Configuration:** Review `config.h` to make sure pins match your custom PCB or development board layout. Modify `LORA_FREQ` if deploying outside of India (865 MHz).
-3. **Flashing the Node:** Compile and upload `smart_meter.ino` to your microchip target. On startup, check the Serial Monitor at `9600 baud` to verify that the EEPROM data recovery and peripheral checkouts pass successfully.
+## 🗂️ Project Structure
 
 ```
+.
+├── smart_meter.ino       # setup() + cooperative scheduler loop()
+├── config.h               # Pin map, calibration constants, timing intervals
+├── globals.h               # Shared hardware objects & volatile state (extern)
+├── power_measure.cpp        # EmonLib readings, unit deduction, relay/RFID power logic
+├── rfid_ops.cpp               # Card detection, authentication, recharge, UID check
+├── lcd_display.cpp              # 4-screen LCD UI (balance / V-I / P-PF / date-time)
+├── lora_ops.cpp                   # Telemetry packet build + send
+└── powerManagement.cpp              # EEPROM save/recover + dying-gasp ISR
+```
+
+---
+
+## 🧠 How It Works
+
+1. **Boot**: RTC, RFID, LoRa, and EmonLib are initialized. The last saved balance is recovered from EEPROM. If a valid balance exists, the relay is closed and a `PWRRESTORE` LoRa packet is sent.
+2. **Every loop iteration** (no `delay()` anywhere in the hot path), four independent tasks are checked against their own timers and only run when due:
+   - **RFID task** (`RFID_INTERVAL_MS = 100ms`) — only polls for a card when `availableUnits <= 0`; otherwise the antenna is kept off to save power.
+   - **Power task** (`POWER_INTERVAL_MS = 1000ms`) — samples V/I via EmonLib, computes power & PF, deducts consumed units from the balance, and drives the relay.
+   - **LCD task** (`LCD_INTERVAL_MS = 1000ms`) — refreshes the current screen; screens auto-cycle every `LCD_SCREEN_CYCLE_MS = 2500ms`.
+   - **LoRa task** (`LORA_INTERVAL_MS = 5000ms`) — packages V/I/P/PF/balance/timestamp and transmits it.
+3. **Recharge**: tapping the authorized card reads a 2-byte unit value from a MIFARE block, adds it to the balance, wipes the token block (so it can't be reused), saves to EEPROM, and reconnects the relay.
+4. **Power loss**: a hardware interrupt on `POWER_SENSE_PIN` fires `runDyingGaspISR()`, which immediately opens the relay, powers down the RFID antenna, writes the balance to EEPROM (~13.6 ms), and fires a final LoRa alert — all before the holdup capacitor's energy runs out.
+
+---
+
+## 🧩 Design Journey & Problems Solved
+
+### 1. FreeRTOS → Cooperative (non-blocking) scheduling
+
+The first version of this project was built on **FreeRTOS**, using separate tasks for RFID polling, power sampling, LCD refresh, and LoRa transmission. In practice this didn't fit well on an ATmega328P-class board:
+
+- FreeRTOS's task control blocks, stacks (one per task), and kernel overhead consume a large slice of the chip's **2KB of SRAM**, leaving very little headroom for EmonLib's sampling buffers, the LoRa payload buffer, and the LCD/RFID library objects.
+- The project doesn't need true preemption or priority scheduling — none of the tasks have hard real-time deadlines against each other, they just need to run "often enough."
+
+**Fix:** the firmware was rewritten around a simple **`millis()`-based cooperative scheduler** in `loop()`. Each task (RFID, power, LCD, LoRa) tracks its own `lastXTime` and only executes once its interval has elapsed — no kernel, no per-task stacks, no blocking `delay()` calls anywhere in the loop. This freed up enough RAM to run reliably and made the timing behavior easy to reason about and debug.
+
+### 2. Capacitor-only power → External DC-DC converter
+
+Initially the plan was to power the *entire* board (Arduino, LCD, RFID, LoRa) from energy stored in a holdup capacitor charged off the mains sense circuit. This turned out to be both **insufficient and unnecessary**:
+
+- A capacitor sized to run the full system (MCU + LCD backlight + RFID + LoRa radio) for any meaningful time would need to be physically large and expensive, and still couldn't guarantee a clean shutdown under load.
+- It's also unnecessary — the system doesn't need to *keep running* after a mains failure, it only needs to **finish one EEPROM write and send one LoRa alert** before going dark.
+
+**Fix:** normal operation is now powered by an **external AC-DC/DC-DC step-down converter** that takes the mains/line potential and regulates it down to a clean 5V rail for the whole board. The holdup capacitor's job was scoped down to exactly one thing: keep the 5V rail alive for the few tens of milliseconds the `runDyingGaspISR()` routine needs to cut the relay, write the balance to EEPROM, and transmit the power-loss alert — nothing more. This made the capacitor dramatically smaller and the power supply far more reliable.
+
+> Note: the `CRASH_THRESHOLD` for the dying-gasp comparator was also corrected during this process — an earlier value (630) sat *above* the normal ADC reading (512) on the 45K/45K divider, which caused false triggers on every boot. It's now set to 500, comfortably between the normal 512 reading and the brown-out point.
+
+---
+
+## ✅ Pros
+
+- Runs entirely on a single low-cost AVR MCU — no external RTOS dependency
+- Survives power cuts without losing the customer's balance
+- Low standby power draw (RFID antenna and reader are duty-cycled based on need)
+- Fully field-serviceable: recharge happens with a physical card tap, no network dependency for the relay/balance logic
+- Remote visibility via LoRa telemetry even where there's no Wi-Fi/GSM coverage
+- Simple, auditable cooperative scheduler — easy to extend with new tasks without RTOS complexity
+
+---
+
+## ⚙️ Calibration
+
+EmonLib calibration constants live in `config.h`:
+
+```cpp
+#define VOLTAGE_CAL   417.0
+#define VOLTAGE_PHASE -0.6
+#define CURRENT_CAL   14.0
+```
+
+Adjust these against a known reference meter/load for your specific sensor pair (ZMPT101B + SCT/ACS712) and burden resistor values.
+
+---
+
+## 🚀 Getting Started
+
+1. Install the Arduino IDE and the following libraries via Library Manager:
+   - `MFRC522`
+   - `LiquidCrystal_I2C`
+   - `RTClib`
+   - `EmonLib`
+   - `LoRa` (Sandeep Mistry)
+2. Wire the hardware per the [Circuit / Pin Connections](#-circuit--pin-connections) table.
+3. Set `AUTHORIZED_UID` in `rfid_ops.cpp` to match your own RFID card's UID.
+4. Flash `smart_meter.ino` to the board.
+5. Open Serial Monitor at `9600` baud to watch boot, recharge, and power-loss logs.
+
+---
+
+## 🔭 Future Improvements
+
+- Move to a 32-bit MCU (e.g. ESP32) for more RAM headroom and native deep-sleep support
+- Encrypt/sign the RFID token block instead of a raw unit value
+- Add a LoRaWAN gateway integration for cloud dashboards
+- Multi-card / multi-user support with per-user balances
