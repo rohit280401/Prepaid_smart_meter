@@ -24,14 +24,14 @@ A standalone, **prepaid electricity meter** built on an Arduino-class MCU. The m
 |---|---|
 | Arduino Uno / Nano (ATmega328P) | Main controller |
 | ZMPT101B (or similar) voltage sensor | AC voltage sensing |
-| SCT-013 / ACS712-style current sensor | AC current sensing |
+| ACS712-style current sensor | AC current sensing |
 | 5V Relay module | Load connect/disconnect |
 | MFRC522 RFID reader + MIFARE Classic card | Recharge token |
 | LiquidCrystal_I2C 16x2 LCD | Local display |
 | LoRa module (SX1278, 865 MHz) | Wireless telemetry |
 | DS3231 RTC module | Real-time clock |
 | 45KΩ / 45KΩ voltage divider | Mains-loss ("dying gasp") detection |
-| External AC–DC step-down / DC-DC buck converter (5V) | Powers the whole board from mains (see [Power Supply Design](#-power-supply-design-journey)) |
+| External AC–DC step-down / DC-DC buck converter (5V) | Powers the whole board from mains) |
 | Small holdup capacitor | Keeps the 5V rail alive just long enough to finish the EEPROM write after mains loss |
 
 ---
@@ -42,7 +42,7 @@ A standalone, **prepaid electricity meter** built on an Arduino-class MCU. The m
 |---|---|---|
 | Relay control | D4 | `LOW` = load ON, `HIGH` = load OFF |
 | Voltage sensor (ZMPT) | A0 | Calibrated via `VOLTAGE_CAL = 417.0` |
-| Current sensor (SCT) | A1 | Calibrated via `CURRENT_CAL = 14.0` |
+| Current sensor (ACS) | A1 | Calibrated via `CURRENT_CAL = 14.0` |
 | RFID SDA/SS | D8 | MFRC522 chip select |
 | RFID RST | D9 | Also used to hard-sleep the reader |
 | RFID MOSI | D11 | Standard Uno SPI |
