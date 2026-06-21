@@ -1,8 +1,4 @@
-Here is a complete, production-ready `README.md` file for your GitHub repository. It compiles all your hardware configurations, features, engineering challenges, and solutions into a beautifully structured, professional format.
 
-You can copy and paste the Markdown block below directly into your repository:
-
-```markdown
 # IoT-Enabled Smart Prepaid Energy Meter
 
 An advanced, ATmega328P-based prepaid electricity metering system featuring real-time AC power monitoring, secure RFID-based token recharges, non-blocking cooperative multitasking, a "Dying Gasp" power-failure protection mechanism, and long-range wireless telemetry via LoRa.
