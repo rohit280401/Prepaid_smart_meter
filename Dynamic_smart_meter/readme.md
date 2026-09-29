@@ -634,34 +634,10 @@ Configure:
 
 ## Wi-Fi Credentials
 
-Do **not** commit real Wi-Fi credentials to a public repository.
-
-A recommended approach is to create:
-
-```text
-secrets.h
-```
-
-containing:
-
 ```cpp
 #define WIFI_SSID "YOUR_WIFI_SSID"
 #define WIFI_PASS "YOUR_WIFI_PASSWORD"
 ```
-
-and add it to:
-
-```text
-.gitignore
-```
-
-```gitignore
-secrets.h
-```
-
-Then include it from the firmware configuration.
-
----
 
 ## Calibration
 
