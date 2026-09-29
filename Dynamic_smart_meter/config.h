@@ -109,9 +109,9 @@ const uint16_t ACK_TIMEOUT_MS[6] PROGMEM = { 1200, 1600, 2400, 3600, 6000, 10000
 #define HTTP_PROBE_EVERY  4
 
 // --- Wi-Fi / Internet Fallback Credentials ---
-#define WIFI_SSID       "LAPTOP"
-#define WIFI_PASS       "Rohit2004"
-#define HTTP_HOST       "192.168.137.1"
+#define WIFI_SSID       "xxxxxxxx"
+#define WIFI_PASS       "xxxxxxxx"
+#define HTTP_HOST       "xxxxxxxx"
 #define HTTP_PORT       1880
 #define HTTP_PATH       "/sensor"
 
